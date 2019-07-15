@@ -63,6 +63,7 @@ func getRandomCoordinates() {
 
 func geoAdd(c redis.Conn) error {
 	_, err := c.Do("GEOADD", "Favor")
+	return err
 }
 
 //test connectivity
@@ -81,14 +82,100 @@ func ping(c redis.Conn) error {
 	return nil
 }
 
-func main() {
-
-	pool := newPool()
-	conn := pool.Get()
-	defer conn.Close()
-
-	err := ping(conn)
+func SET(c redis.Conn, key string, val interface{}) bool {
+	resp, err := redis.String(c.Do("SET", key, val))
 	if err != nil {
 		fmt.Println(err)
 	}
+	return resp == "OK"
+}
+
+// Set if doesn't exist
+func SETNX(c redis.Conn, key string, val interface{}) bool {
+	resp, err := redis.Int(c.Do("SETNX", key, val))
+	if err != nil {
+		fmt.Println(err)
+	}
+	return resp == 1
+}
+
+func INCR(c redis.Conn, key string) interface{} {
+	resp, err := c.Do("INCR", key)
+	if err != nil {
+		fmt.Println(err)
+	}
+	return resp
+}
+
+// Deletes key after time seconds
+func EXPIRE(c redis.Conn, key string, time int) bool {
+	resp, err := redis.Int(c.Do("EXPIRE", key, time))
+	if err != nil {
+		fmt.Println(err)
+	}
+	return resp == 1
+}
+
+// Time to live for key with expiration time
+func TTL(c redis.Conn, key string) interface{} {
+	resp, err := c.Do("TTL", key)
+	if err != nil {
+		fmt.Println(err)
+	}
+	return resp
+}
+
+func GET(c redis.Conn, key string) interface{} {
+	resp, err := redis.String(c.Do("GET", key))
+	if err != nil {
+		fmt.Println(err)
+	}
+	return resp
+}
+
+func DEL(c redis.Conn, key string) bool {
+	resp, err := redis.Int(c.Do("DEL", key))
+	if err != nil {
+		fmt.Println(err)
+	}
+	return resp == 1
+}
+
+func main() {
+
+	pool := newPool()
+	c := pool.Get()
+	defer c.Close()
+
+	// Creates key "ex" and sets value 0
+	succ := SET(c, "ex", 0)
+	fmt.Println("SET", succ)
+
+	// Returns 0
+	resp := GET(c, "ex")
+	fmt.Println("GET", resp)
+
+	// Increments key "ex" from 0 -> 1
+	resp = INCR(c, "ex")
+	fmt.Println("INCR", resp)
+
+	// Sets if doesn't exist
+	succ = SETNX(c, "ex", 5)
+	fmt.Println("SETNX", succ)
+
+	// Deletes key
+	succ = DEL(c, "ex")
+	fmt.Println("DEL", succ)
+
+	// Sets if doesn't exist
+	succ = SETNX(c, "ex", 5)
+	fmt.Println("SETNX", succ)
+
+	// Sets expiration
+	succ = EXPIRE(c, "ex", 5)
+	fmt.Println("EXPIRE", succ)
+
+	// Checks time to live
+	resp = TTL(c, "ex")
+	fmt.Println("TTL", resp)
 }
