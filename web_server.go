@@ -1,12 +1,30 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"math/rand"
 	"time"
 
 	"github.com/gomodule/redigo/redis"
 )
+
+type Note struct {
+	Pid          int
+	Caption      string
+	DateCreated  string
+	DateFound    string
+	IsAnonymous  bool
+	Latitude     float64
+	Longitude    float64
+	NoteImage    string
+	ProfileImage string
+	Author_id    int
+}
+
+var pid int
+var authorid int
+var userid int
 
 func newPool() *redis.Pool {
 	return &redis.Pool{
@@ -25,17 +43,57 @@ func newPool() *redis.Pool {
 	}
 }
 
-func getRandomCoordinates() {
+func generateNote() Note {
+	lat, long := getRandomCoordinates()
+	pid++
+	authorid++
+	return Note{
+		pid,
+		"",
+		"",
+		"",
+		false,
+		lat,
+		long,
+		"https://firebasestorage.googleapis.com/v0/b/nottl-92731.appspot.com/o/notes%2F01DE3BD6-2807-4947-B39A-8A7F13397EE0.jpg?alt=media&token=12f02b79-894d-497e-985f-0f10063c58da",
+		"https://firebasestorage.googleapis.com/v0/b/nottl-92731.appspot.com/o/profile_pictures%2F27171C21-C9BD-4452-AF66-DC417DD508D8.jpg?alt=media&token=4e217783-f10c-44e0-8b82-b0104d59010d",
+		authorid,
+	}
+}
+
+func addNote(c redis.Conn) error {
+	//marshal into json
+	note := generateNote()
+	//fmt.Println(note)
+	b, err := json.Marshal(note)
+	if err != nil {
+		return err
+	}
+
+	//fmt.Println(string(b))
+	input := string(b)
+
+	fmt.Printf("note lat: %f, lon: %f\n", note.Latitude, note.Longitude)
+
+	_, err = c.Do("GEOADD", "mapNotes", note.Longitude, note.Latitude, input)
+
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func getRandomCoordinates() (float64, float64) {
 
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 	// get random decimal
 	latDec := rand.Float64()
 	longDec := rand.Float64()
 
-	// get if negative ( 1 => -, 0 => +)
+	// get if negative ( 2 => -, 1 => +)
 
-	latNeg := r.Intn(1)
-	longNeg := r.Intn(1)
+	latNeg := r.Intn(2)
+	longNeg := r.Intn(2)
 
 	// get integer
 
@@ -46,18 +104,18 @@ func getRandomCoordinates() {
 	var actualLong float64
 
 	if latNeg == 1 {
-		actualLat = float64(latVal*(-1)) + latDec
+		actualLat = float64(latVal*(-1)) - latDec
 	} else {
 		actualLat = float64(latVal) + latDec
 	}
 
 	if longNeg == 1 {
-		actualLong = float64(longVal*(-1)) + longDec
+		actualLong = float64(longVal*(-1)) - longDec
 	} else {
 		actualLong = float64(longVal) + longDec
 	}
 
-	fmt.Printf("long: %f, lat: %f", actualLong, actualLat)
+	return actualLat, actualLong
 
 }
 
@@ -144,38 +202,52 @@ func DEL(c redis.Conn, key string) bool {
 func main() {
 
 	pool := newPool()
-	c := pool.Get()
-	defer c.Close()
+	conn := pool.Get()
+	defer conn.Close()
 
-	// Creates key "ex" and sets value 0
-	succ := SET(c, "ex", 0)
-	fmt.Println("SET", succ)
+	err := ping(conn)
+	if err != nil {
+		fmt.Println(err)
+	}
 
-	// Returns 0
-	resp := GET(c, "ex")
-	fmt.Println("GET", resp)
+	// Adding notes to the map
+	for i := 0; i < 5; i++ {
 
-	// Increments key "ex" from 0 -> 1
-	resp = INCR(c, "ex")
-	fmt.Println("INCR", resp)
+		err = addNote(conn)
+		if err != nil {
+			fmt.Printf("failed to add note")
+			fmt.Println(err)
+			break
+		}
 
-	// Sets if doesn't exist
-	succ = SETNX(c, "ex", 5)
-	fmt.Println("SETNX", succ)
+	}
 
-	// Deletes key
-	succ = DEL(c, "ex")
-	fmt.Println("DEL", succ)
+	//get location to search from
+	lat, lon := getRandomCoordinates()
 
-	// Sets if doesn't exist
-	succ = SETNX(c, "ex", 5)
-	fmt.Println("SETNX", succ)
+	fmt.Printf("searching 21,000km radius from lat: %f, lon: %f\n", lon, lat)
 
-	// Sets expiration
-	succ = EXPIRE(c, "ex", 5)
-	fmt.Println("EXPIRE", succ)
+	// search in the maximum radius on earths surface (20,905km)
+	reply, err := conn.Do("GEORADIUS", "mapNotes", lon, lat, "21000", "km")
 
-	// Checks time to live
-	resp = TTL(c, "ex")
-	fmt.Println("TTL", resp)
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	fmt.Printf("%T\n", reply)
+
+	switch t := reply.(type) {
+	case []interface{}:
+		returnedValues := make([]Note, len(t))
+		for i, value := range t {
+			if err := json.Unmarshal(value.([]byte), &returnedValues[i]); err != nil {
+				panic(err)
+			}
+			fmt.Println(returnedValues[i])
+		}
+	default:
+		fmt.Println("uh oh not a data type we wanted\n")
+	}
+
+	conn.Do("FLUSHALL")
 }
