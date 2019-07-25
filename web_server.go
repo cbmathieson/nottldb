@@ -208,7 +208,8 @@ func GEORADIUS(c redis.Conn, key string, lon float64, lat float64, radius string
 }
 
 func main() {
-
+	println("hello world")
+	/*
 	pool := newPool()
 	conn := pool.Get()
 	defer conn.Close()
@@ -245,4 +246,5 @@ func main() {
 	}
 
 	conn.Do("FLUSHALL")
+	*/
 }
