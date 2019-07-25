@@ -44,7 +44,7 @@ func newPool() *redis.Pool {
 }
 
 func generateNote() Note {
-	lat, long := getRandomCoordinates()
+	lon, lat := getRandomCoordinates()
 	pid++
 	authorid++
 	return Note{
@@ -54,7 +54,7 @@ func generateNote() Note {
 		"",
 		false,
 		lat,
-		long,
+		lon,
 		"https://firebasestorage.googleapis.com/v0/b/nottl-92731.appspot.com/o/notes%2F01DE3BD6-2807-4947-B39A-8A7F13397EE0.jpg?alt=media&token=12f02b79-894d-497e-985f-0f10063c58da",
 		"https://firebasestorage.googleapis.com/v0/b/nottl-92731.appspot.com/o/profile_pictures%2F27171C21-C9BD-4452-AF66-DC417DD508D8.jpg?alt=media&token=4e217783-f10c-44e0-8b82-b0104d59010d",
 		authorid,
@@ -115,7 +115,7 @@ func getRandomCoordinates() (float64, float64) {
 		actualLong = float64(longVal) + longDec
 	}
 
-	return actualLat, actualLong
+	return actualLong, actualLat
 
 }
 
@@ -199,21 +199,24 @@ func DEL(c redis.Conn, key string) bool {
 	return resp == 1
 }
 
+func GEORADIUS(c redis.Conn, key string, lon float64, lat float64, radius string, unit string) interface{} {
+	resp, err := c.Do("GEORADIUS", key, lon, lat, "21000", "km")
+	if err != nil {
+		fmt.Println(err)
+	}
+	return resp
+}
+
 func main() {
 
 	pool := newPool()
 	conn := pool.Get()
 	defer conn.Close()
 
-	err := ping(conn)
-	if err != nil {
-		fmt.Println(err)
-	}
-
 	// Adding notes to the map
 	for i := 0; i < 5; i++ {
 
-		err = addNote(conn)
+		err := addNote(conn)
 		if err != nil {
 			fmt.Printf("failed to add note")
 			fmt.Println(err)
@@ -223,18 +226,10 @@ func main() {
 	}
 
 	//get location to search from
-	lat, lon := getRandomCoordinates()
-
+	lon, lat := getRandomCoordinates()
 	fmt.Printf("searching 21,000km radius from lat: %f, lon: %f\n", lon, lat)
-
 	// search in the maximum radius on earths surface (20,905km)
-	reply, err := conn.Do("GEORADIUS", "mapNotes", lon, lat, "21000", "km")
-
-	if err != nil {
-		fmt.Println(err)
-	}
-
-	fmt.Printf("%T\n", reply)
+	reply := GEORADIUS(conn, "mapNotes", lon, lat, "21000", "km")
 
 	switch t := reply.(type) {
 	case []interface{}:
