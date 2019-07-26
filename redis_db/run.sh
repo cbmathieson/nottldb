@@ -1,4 +1,4 @@
-echo "spinning up redis instances..."
+echo "Spinning up redis instances..."
 
 for i in {1..4}
 do
