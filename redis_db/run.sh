@@ -1,12 +1,12 @@
 echo "Spinning up redis instances..."
 
-file=redis_ports.txt
+file=ports/redis.txt
 if [ -f "$file" ]
 then
-    rm redis_ports.txt
+    rm "$file"
 fi
 
-touch redis_ports.txt
+touch "$file"
 
 for i in {1..4}
 do

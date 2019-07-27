@@ -6,6 +6,7 @@ A backend system for nottl
 - User information is stored on a Postgres database
 - Go web server mediates requests
 
+*Go v1.11 and Docker must be installed*
 
 ## Redis Instances
 
@@ -35,7 +36,7 @@ Spinning it up (must be done after redis and db have started)
 ~~~
 sh go_server/run.sh
 ~~~
-All ports for redis (redis_ports.txt)
-and the database port (db_port.txt) 
+All ports for redis (redis.txt)
+and the database port (db.txt) 
 are printed to a text file to be read by the go server
 
