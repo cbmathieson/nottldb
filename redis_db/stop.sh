@@ -11,3 +11,5 @@ for i in {1..4}
 do
 docker rm "redis$i"
 done
+
+rm ports/redis.txt

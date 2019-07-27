@@ -1,9 +1,12 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"math/rand"
+	"os"
+	"strconv"
 	"time"
 
 	"github.com/gomodule/redigo/redis"
@@ -207,44 +210,116 @@ func GEORADIUS(c redis.Conn, key string, lon float64, lat float64, radius string
 	return resp
 }
 
-func main() {
-	println("hello world")
-	/*
-	pool := newPool()
-	conn := pool.Get()
-	defer conn.Close()
+// returns dbport, and redis ports.
+// if empty, exit
+func getPorts() (int, []int) {
 
-	// Adding notes to the map
-	for i := 0; i < 5; i++ {
+	// Read in db port
 
-		err := addNote(conn)
-		if err != nil {
-			fmt.Printf("failed to add note")
-			fmt.Println(err)
+	dbFile, err := os.Open("../ports/db.txt")
+	if err != nil {
+		fmt.Println("ERROR: no db port")
+		os.Exit(1)
+	}
+	scanner := bufio.NewScanner(dbFile)
+
+	dbPort := 0
+
+	for scanner.Scan() {
+		if dbPort != 0 {
 			break
 		}
+		line := scanner.Text()
+		dbPort, err = strconv.Atoi(line)
 
-	}
-
-	//get location to search from
-	lon, lat := getRandomCoordinates()
-	fmt.Printf("searching 21,000km radius from lat: %f, lon: %f\n", lon, lat)
-	// search in the maximum radius on earths surface (20,905km)
-	reply := GEORADIUS(conn, "mapNotes", lon, lat, "21000", "km")
-
-	switch t := reply.(type) {
-	case []interface{}:
-		returnedValues := make([]Note, len(t))
-		for i, value := range t {
-			if err := json.Unmarshal(value.([]byte), &returnedValues[i]); err != nil {
-				panic(err)
-			}
-			fmt.Println(returnedValues[i])
+		if err != nil {
+			fmt.Println("ERROR: could not parse string in file")
+			os.Exit(1)
 		}
-	default:
-		fmt.Println("uh oh not a data type we wanted\n")
 	}
 
-	conn.Do("FLUSHALL")
+	if dbPort == 0 {
+		fmt.Println("ERROR: No port listening for db")
+		os.Exit(1)
+	}
+
+	// Read in redis ports
+
+	redisFile, err := os.Open("../ports/redis.txt")
+
+	if err != nil {
+		fmt.Println("ERROR: no redis port")
+		os.Exit(1)
+	}
+
+	scanner = bufio.NewScanner(redisFile)
+
+	redisPorts := make([]int, 0)
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		port, err := strconv.Atoi(line)
+
+		if err != nil {
+			fmt.Println("ERROR: could not parse string in file")
+			os.Exit(1)
+		}
+
+		redisPorts = append(redisPorts, port)
+	}
+
+	if len(redisPorts) < 1 {
+		fmt.Println("ERROR: no redis ports")
+		os.Exit(1)
+	}
+
+	return dbPort, redisPorts
+
+}
+
+func main() {
+
+	dbPort, redisPorts := getPorts()
+
+	fmt.Printf("dbPort: %d\n", dbPort)
+	fmt.Printf("redisPorts: %v\n", redisPorts)
+
+	/*
+		pool := newPool()
+		conn := pool.Get()
+		defer conn.Close()
+
+		// Adding notes to the map
+		for i := 0; i < 5; i++ {
+
+			err := addNote(conn)
+			if err != nil {
+				fmt.Printf("failed to add note")
+				fmt.Println(err)
+				break
+			}
+
+		}
+
+		//get location to search from
+		lon, lat := getRandomCoordinates()
+		fmt.Printf("searching 21,000km radius from lat: %f, lon: %f\n", lon, lat)
+		// search in the maximum radius on earths surface (20,905km)
+		reply := GEORADIUS(conn, "mapNotes", lon, lat, "21000", "km")
+
+		switch t := reply.(type) {
+		case []interface{}:
+			returnedValues := make([]Note, len(t))
+			for i, value := range t {
+				if err := json.Unmarshal(value.([]byte), &returnedValues[i]); err != nil {
+					panic(err)
+				}
+				fmt.Println(returnedValues[i])
+			}
+		default:
+			fmt.Println("uh oh not a data type we wanted\n")
+		}
+
+		conn.Do("FLUSHALL")
 	*/
 }
