@@ -31,7 +31,11 @@ sh postgres_db/stop.sh
 
 ## Go Server
 
-Spinning it up
+Spinning it up (must be done after redis and db have started)
 ~~~
 sh go_server/run.sh
 ~~~
+All ports for redis (redis_ports.txt)
+and the database port (db_port.txt) 
+are printed to a text file to be read by the go server
+

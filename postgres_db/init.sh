@@ -10,4 +10,16 @@ echo "password: pass"
 echo "initialising user_db..."
 _="$(psql -h localhost -U postgres -p $port -d postgres -f ./postgres_db/init_user_db.sql)"
 
+file=db_port.txt
+
+
+if [ -f "$file" ]
+then
+    rm db_port.txt
+fi
+
+touch db_port.txt
+
+echo "$port" > "$file"
+
 
