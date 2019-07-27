@@ -1,5 +1,12 @@
 echo "Spinning up redis instances..."
 
+folder=ports/
+
+if [ ! -d "$folder" ]
+then
+mkdir "$folder"
+fi
+
 file=ports/redis.txt
 if [ -f "$file" ]
 then
