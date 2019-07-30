@@ -230,6 +230,7 @@ func getPorts() (int, []int) {
 
 	dbFile, err := os.Open("../ports/db.txt")
 	if err != nil {
+		fmt.Println(err)
 		fmt.Println("ERROR: no db port")
 		os.Exit(1)
 	}
@@ -308,12 +309,31 @@ func createPools(ports []int) []*redis.Pool {
 	return redisInstances
 }
 
+func powerOf4(instances int) bool {
+	if instances == 0 {
+		return false
+	}
+	for instances != 1 {
+		if instances%4 != 0 {
+			return false
+		}
+		instances = instances / 4
+	}
+	return true
+}
+
 func main() {
 
 	dbPort, redisPorts := getPorts()
 
 	fmt.Printf("dbPort: %d\n", dbPort)
 	fmt.Printf("redisPorts: %v\n", redisPorts)
+
+	//check if power of 4
+	if !powerOf4(len(redisPorts)) {
+		fmt.Printf("ERROR: Can't split %d instances into even quadrants. Need 4^n instances\n", len(redisPorts))
+		return
+	}
 
 	redisInstances := createPools(redisPorts)
 

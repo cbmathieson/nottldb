@@ -6,7 +6,7 @@ if [ -d "$folder" ]
     input=ports/redis.txt
     if [ ! -f $input ]
         then
-        echo "can't find instances to close reeeee"
+        echo "can't find instances to close"
     else
         echo "Removing redis containers..."
         instances="0"
@@ -22,5 +22,5 @@ if [ -d "$folder" ]
         rm ports/redis.txt
     fi
 else
-    echo "can't find instances to close yeeee"
+    echo "can't find instances to close"
 fi
