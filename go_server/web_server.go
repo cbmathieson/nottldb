@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"math"
 	"math/rand"
 	"os"
 	"strconv"
@@ -25,11 +26,22 @@ type Note struct {
 	Author_id    int
 }
 
+type Quadrant struct {
+	startingLat float64
+	endingLat   float64
+	startingLon float64
+	endingLon   float64
+}
+
 var pid int
 var authorid int
 var userid int
+var quadrants []Quadrant
 
-func newPool() *redis.Pool {
+func newPool(port int) *redis.Pool {
+
+	portString := fmt.Sprintf(":%d", port)
+
 	return &redis.Pool{
 		//Max number of idle connections in the pool
 		MaxIdle: 80,
@@ -37,7 +49,7 @@ func newPool() *redis.Pool {
 		MaxActive: 12000,
 
 		Dial: func() (redis.Conn, error) {
-			c, err := redis.Dial("tcp", ":6379")
+			c, err := redis.Dial("tcp", portString)
 			if err != nil {
 				panic(err.Error())
 			}
@@ -277,6 +289,25 @@ func getPorts() (int, []int) {
 
 }
 
+func createPools(ports []int) []*redis.Pool {
+	redisInstances := make([]*redis.Pool, len(ports))
+
+	for i := 0; i < len(ports); i++ {
+		redisInstances[i] = newPool(ports[i])
+	}
+
+	// just checking if connected to all instances
+	for i := 0; i < len(redisInstances); i++ {
+		conn := redisInstances[i].Get()
+
+		ping(conn)
+
+		conn.Close()
+	}
+
+	return redisInstances
+}
+
 func main() {
 
 	dbPort, redisPorts := getPorts()
@@ -284,42 +315,62 @@ func main() {
 	fmt.Printf("dbPort: %d\n", dbPort)
 	fmt.Printf("redisPorts: %v\n", redisPorts)
 
-	/*
-		pool := newPool()
-		conn := pool.Get()
-		defer conn.Close()
+	redisInstances := createPools(redisPorts)
 
-		// Adding notes to the map
-		for i := 0; i < 5; i++ {
+	//creating quadrants based on number of redis instances
+	totalLat := float64(85 + 85)
+	totalLon := float64(180 + 180)
 
-			err := addNote(conn)
-			if err != nil {
-				fmt.Printf("failed to add note")
-				fmt.Println(err)
-				break
-			}
+	quadrantLatSize := totalLat / (math.Sqrt(float64(len(redisInstances))))
+	quadrantLonSize := totalLon / (math.Sqrt(float64(len(redisInstances))))
 
+	fmt.Printf("lat: %f, lon: %f per quadrant\n", quadrantLatSize, quadrantLonSize)
+
+	// Loop infinitely while waiting for incoming connections.
+	// Decides based on coordinates which cache should be used.
+
+	/*while(true) {
+
+	}
+
+	// Length,
+
+	pool := newPool()
+	conn := pool.Get()
+	defer conn.Close()
+
+	// Adding notes to the map
+	for i := 0; i < 5; i++ {
+
+		err := addNote(conn)
+		if err != nil {
+			fmt.Printf("failed to add note")
+			fmt.Println(err)
+			break
 		}
 
-		//get location to search from
-		lon, lat := getRandomCoordinates()
-		fmt.Printf("searching 21,000km radius from lat: %f, lon: %f\n", lon, lat)
-		// search in the maximum radius on earths surface (20,905km)
-		reply := GEORADIUS(conn, "mapNotes", lon, lat, "21000", "km")
+	}
 
-		switch t := reply.(type) {
-		case []interface{}:
-			returnedValues := make([]Note, len(t))
-			for i, value := range t {
-				if err := json.Unmarshal(value.([]byte), &returnedValues[i]); err != nil {
-					panic(err)
-				}
-				fmt.Println(returnedValues[i])
+	//get location to search from
+	lon, lat := getRandomCoordinates()
+	fmt.Printf("searching 21,000km radius from lat: %f, lon: %f\n", lon, lat)
+	// search in the maximum radius on earths surface (20,905km)
+	reply := GEORADIUS(conn, "mapNotes", lon, lat, "21000", "km")
+
+	switch t := reply.(type) {
+	case []interface{}:
+		returnedValues := make([]Note, len(t))
+		for i, value := range t {
+			if err := json.Unmarshal(value.([]byte), &returnedValues[i]); err != nil {
+				panic(err)
 			}
-		default:
-			fmt.Println("uh oh not a data type we wanted\n")
+			fmt.Println(returnedValues[i])
 		}
+	default:
+		fmt.Println("uh oh not a data type we wanted\n")
+	}
 
-		conn.Do("FLUSHALL")
-	*/
+	//delete everything on the instance
+	conn.Do("FLUSHALL")*/
+
 }
