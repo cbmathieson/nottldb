@@ -1,5 +1,5 @@
 # 0 is true and 1 is false!!!!!
-function is_power_of_two () {
+is_power_of_two() {
     declare -i n=$1
     if ((n == 0))
     then
