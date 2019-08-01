@@ -1,17 +1,17 @@
 # 0 is true and 1 is false!!!!!
-is_power_of_two() {
-    declare -i n=$1
-    if ((n == 0))
+is_power_of_two () {
+    val="$1"
+    if (($val == 0))
     then
         return 1
     else
-        while ((n != 1))
+        while (($val != 1))
         do
-            if ((n % 4 != 0))
+            if (($val % 4 != 0))
             then
                 return 1
             fi
-            n=$((n / 4))
+            val=$(($val / 4))
         done
         return 0
     fi
