@@ -1,11 +1,11 @@
 # 0 is true and 1 is false!!!!!
 is_power_of_two () {
     val="$1"
-    if (($val == 0))
+    if [ "$val" -eq 0 ]
     then
         return 1
     else
-        while (($val != 1))
+        while [ ! "$val" -eq 1 ]
         do
             if (($val % 4 != 0))
             then
