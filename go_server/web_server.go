@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"math/rand"
@@ -26,17 +27,18 @@ type Note struct {
 	Author_id    int
 }
 
-type Quadrant struct {
-	startingLat float64
-	endingLat   float64
-	startingLon float64
-	endingLon   float64
+type Query struct {
+	idx     int
+	request string
 }
 
 var pid int
 var authorid int
 var userid int
-var quadrants []Quadrant
+var quadrantLatSize float64 = -1
+var quadrantLonSize float64 = -1
+var totalInstances float64 = 0
+var sideLength int
 
 func newPool(port int) *redis.Pool {
 
@@ -322,7 +324,60 @@ func powerOf4(instances int) bool {
 	return true
 }
 
-func main() {
+// returns array index of redis index in user's region
+// returns -1 if failure
+func findInstanceInRadius(lat float64, lon float64) (int, int) {
+	var xIndex = -1
+	var yIndex = -1
+	for i := 0; i < sideLength; i++ {
+		if lat >= (-85 + (quadrantLatSize * float64(i))) {
+			yIndex = i
+		}
+	}
+
+	for i := 0; i < sideLength; i++ {
+		if lon >= (-180 + (quadrantLonSize * float64(i))) {
+			xIndex = i
+		}
+	}
+
+	return yIndex, xIndex
+}
+
+/*func readRequest(lon float64, lat float64, redisInstances []*redis.Pool) []Note {
+
+	yIndex, xIndex := findInstancesInRadius(lat, lon)
+
+	reply := GEORADIUS(conn, "mapNotes", lon, lat, "4", "km")
+
+}*/
+
+//returns Query with {-1,""} if empty
+func dequeue(queue []Query) ([]Query, Query) {
+	if len(queue) <= 0 {
+		return queue, Query{-1, ""}
+	}
+	//peek top
+	x := queue[0]
+	//delete top
+	queue = queue[1:]
+
+	return queue, x
+}
+
+func makeQueues() [][][]Query {
+	redisQueues := make([][][]Query, sideLength)
+	for i := range redisQueues {
+		redisQueues[i] = make([][]Query, sideLength)
+		for j := range redisQueues[i] {
+			redisQueues[i][j] = make([]Query, 0)
+		}
+	}
+	return redisQueues
+}
+
+//initialises redis instances and sets global variables
+func initPools() ([]*redis.Pool, error) {
 
 	dbPort, redisPorts := getPorts()
 
@@ -331,8 +386,8 @@ func main() {
 
 	//check if power of 4
 	if !powerOf4(len(redisPorts)) {
-		fmt.Printf("ERROR: Can't split %d instances into even quadrants. Need 4^n instances\n", len(redisPorts))
-		return
+		errorString := fmt.Sprintf("ERROR: Can't split %d instances into even quadrants. Need 4^n instances\n", len(redisPorts))
+		return nil, errors.New(errorString)
 	}
 
 	redisInstances := createPools(redisPorts)
@@ -341,56 +396,54 @@ func main() {
 	totalLat := float64(85 + 85)
 	totalLon := float64(180 + 180)
 
-	quadrantLatSize := totalLat / (math.Sqrt(float64(len(redisInstances))))
-	quadrantLonSize := totalLon / (math.Sqrt(float64(len(redisInstances))))
+	sideLength = int(math.Sqrt(float64(len(redisInstances))))
+	totalInstances = float64(len(redisInstances))
+	quadrantLatSize = totalLat / float64(sideLength)
+	quadrantLonSize = totalLon / float64(sideLength)
 
 	fmt.Printf("lat: %f, lon: %f per quadrant\n", quadrantLatSize, quadrantLonSize)
+
+	return redisInstances, nil
+
+}
+
+func main() {
+
+	redisInstances, err := initPools()
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	redisQueues := makeQueues()
+
+	fmt.Println(redisInstances)
+	fmt.Println(redisQueues)
 
 	// Loop infinitely while waiting for incoming connections.
 	// Decides based on coordinates which cache should be used.
 
-	/*while(true) {
+	/*
+		//get location to search from
+		lon, lat := getRandomCoordinates()
+		fmt.Printf("searching 21,000km radius from lat: %f, lon: %f\n", lon, lat)
+		// search in the maximum radius on earths surface (20,905km)
+		reply := GEORADIUS(conn, "mapNotes", lon, lat, "21000", "km")
 
-	}
-
-	// Length,
-
-	pool := newPool()
-	conn := pool.Get()
-	defer conn.Close()
-
-	// Adding notes to the map
-	for i := 0; i < 5; i++ {
-
-		err := addNote(conn)
-		if err != nil {
-			fmt.Printf("failed to add note")
-			fmt.Println(err)
-			break
-		}
-
-	}
-
-	//get location to search from
-	lon, lat := getRandomCoordinates()
-	fmt.Printf("searching 21,000km radius from lat: %f, lon: %f\n", lon, lat)
-	// search in the maximum radius on earths surface (20,905km)
-	reply := GEORADIUS(conn, "mapNotes", lon, lat, "21000", "km")
-
-	switch t := reply.(type) {
-	case []interface{}:
-		returnedValues := make([]Note, len(t))
-		for i, value := range t {
-			if err := json.Unmarshal(value.([]byte), &returnedValues[i]); err != nil {
-				panic(err)
+		switch t := reply.(type) {
+		case []interface{}:
+			returnedValues := make([]Note, len(t))
+			for i, value := range t {
+				if err := json.Unmarshal(value.([]byte), &returnedValues[i]); err != nil {
+					panic(err)
+				}
+				fmt.Println(returnedValues[i])
 			}
-			fmt.Println(returnedValues[i])
+		default:
+			fmt.Println("uh oh not a data type we wanted\n")
 		}
-	default:
-		fmt.Println("uh oh not a data type we wanted\n")
-	}
 
-	//delete everything on the instance
-	conn.Do("FLUSHALL")*/
+		//delete everything on the instance
+		conn.Do("FLUSHALL")*/
 
 }
