@@ -7,11 +7,11 @@ is_power_of_two () {
     else
         while [ ! "$val" -eq 1 ]
         do
-            if (($val % 4 != 0))
+            if [ ! `expr $val % 4` -eq 0 ]
             then
                 return 1
             fi
-            val=$(($val / 4))
+        val=`expr $val / 4`
         done
         return 0
     fi
@@ -47,12 +47,13 @@ then
 fi
 
 touch "$file"
-
-for ((i=1; i<=instances; i++))
+i=1
+while [ ! "$i" -eq `expr $instances + 1` ]
 do
 _="$(docker run --name "redis$i" -d -P redis)"
 fullport="$(docker port redis$i)"
 port=${fullport#*:}
 echo "redis$i is listening on port: $port"
 echo "$port" >> "$file"
+let "i++"
 done

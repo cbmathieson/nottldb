@@ -6,7 +6,7 @@ A backend system for nottl
 - User information is stored on a Postgres database
 - Go web server mediates requests
 
-*Golang >= v1.11 and Docker must be installed*
+*Golang >= v1.11, Docker, and Postgres v11 must be installed*
 
 ## Redis Instances
 

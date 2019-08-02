@@ -13,12 +13,9 @@ if [ -d "$folder" ]
         while IFS= read -r line
         do
             let "instances++"
+            docker stop "redis$instances"
+            docker rm "redis$instances"
         done < "$input"
-        for ((i=1; i<=instances; i++))
-        do
-            docker stop "redis$i"
-            docker rm "redis$i"
-        done
         rm ports/redis.txt
     fi
 else
