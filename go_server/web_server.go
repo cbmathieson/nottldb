@@ -292,20 +292,19 @@ func getPorts() (int, []int) {
 
 }
 
-func createPools(ports []int) []*redis.Pool {
-	redisInstances := make([]*redis.Pool, len(ports))
+func createPools(ports []int) [][]*redis.Pool {
+	redisInstances := make([][]*redis.Pool, sideLength)
 
-	for i := 0; i < len(ports); i++ {
-		redisInstances[i] = newPool(ports[i])
-	}
+	for i := 0; i < sideLength; i++ {
+		redisInstances[i] = make([]*redis.Pool, sideLength)
+		for j := 0; j < sideLength; j++ {
+			redisInstances[i][j] = newPool(ports[i])
 
-	// just checking if connected to all instances
-	for i := 0; i < len(redisInstances); i++ {
-		conn := redisInstances[i].Get()
-
-		ping(conn)
-
-		conn.Close()
+			// just checking if connected to instance
+			conn := redisInstances[i][j].Get()
+			ping(conn)
+			conn.Close()
+		}
 	}
 
 	return redisInstances
@@ -325,8 +324,9 @@ func powerOf4(instances int) bool {
 }
 
 // returns array index of redis index in user's region
+// lon maps to x and lat maps to y
 // returns -1 if failure
-func findInstanceInRadius(lat float64, lon float64) (int, int) {
+func findInstanceInRadius(lon float64, lat float64) (int, int) {
 	var xIndex = -1
 	var yIndex = -1
 	for i := 0; i < sideLength; i++ {
@@ -341,10 +341,10 @@ func findInstanceInRadius(lat float64, lon float64) (int, int) {
 		}
 	}
 
-	return yIndex, xIndex
+	return xIndex, yIndex
 }
 
-/*func readRequest(lon float64, lat float64, redisInstances []*redis.Pool) []Note {
+/*func readRequest(lon float64, lat float64, redisInstances [][]*redis.Pool) []Note {
 
 	yIndex, xIndex := findInstancesInRadius(lat, lon)
 
@@ -377,7 +377,7 @@ func makeQueues() [][][]Query {
 }
 
 //initialises redis instances and sets global variables
-func initPools() ([]*redis.Pool, error) {
+func initPools() ([][]*redis.Pool, error) {
 
 	dbPort, redisPorts := getPorts()
 
@@ -390,18 +390,18 @@ func initPools() ([]*redis.Pool, error) {
 		return nil, errors.New(errorString)
 	}
 
-	redisInstances := createPools(redisPorts)
-
 	//creating quadrants based on number of redis instances
 	totalLat := float64(85 + 85)
 	totalLon := float64(180 + 180)
 
-	sideLength = int(math.Sqrt(float64(len(redisInstances))))
-	totalInstances = float64(len(redisInstances))
+	sideLength = int(math.Sqrt(float64(len(redisPorts))))
+	totalInstances = float64(len(redisPorts))
 	quadrantLatSize = totalLat / float64(sideLength)
 	quadrantLonSize = totalLon / float64(sideLength)
 
 	fmt.Printf("lat: %f, lon: %f per quadrant\n", quadrantLatSize, quadrantLonSize)
+
+	redisInstances := createPools(redisPorts)
 
 	return redisInstances, nil
 
