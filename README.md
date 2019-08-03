@@ -36,5 +36,5 @@ Spinning it up (must be done after redis and db have started)
 ~~~
 sh go_server/run.sh
 ~~~
-Reads in ports from text files and prints them out currently
+uploads randomly located notes to redis instances and reads them back given an random user location
 
