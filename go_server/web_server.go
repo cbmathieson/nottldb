@@ -78,10 +78,13 @@ func generateNote() Note {
 	}
 }
 
-func addNote(c redis.Conn) error {
+func addNote(note Note, pool *redis.Pool) error {
+
+	// create connection
+	c := pool.Get()
+	defer c.Close()
+
 	//marshal into json
-	note := generateNote()
-	//fmt.Println(note)
 	b, err := json.Marshal(note)
 	if err != nil {
 		return err
@@ -344,13 +347,37 @@ func findInstanceInRadius(lon float64, lat float64) (int, int) {
 	return xIndex, yIndex
 }
 
-/*func readRequest(lon float64, lat float64, redisInstances [][]*redis.Pool) []Note {
+func readRequest(lon float64, lat float64, redisInstances [][]*redis.Pool) []Note {
 
-	yIndex, xIndex := findInstancesInRadius(lat, lon)
+	x, y := findInstanceInRadius(lon, lat)
 
-	reply := GEORADIUS(conn, "mapNotes", lon, lat, "4", "km")
+	pool := redisInstances[x][y]
 
-}*/
+	c := pool.Get()
+	defer c.Close()
+
+	fmt.Printf("searching 21,000km radius from lat: %f, lon: %f in instance x:%d,y:%d\n", lon, lat, x, y)
+
+	reply := GEORADIUS(c, "mapNotes", lon, lat, "21000", "km")
+
+	var notes []Note
+
+	switch t := reply.(type) {
+	case []interface{}:
+		returnedValues := make([]Note, len(t))
+		for i, value := range t {
+			if err := json.Unmarshal(value.([]byte), &returnedValues[i]); err != nil {
+				panic(err)
+			}
+		}
+		notes = returnedValues
+	default:
+		fmt.Println("uh oh not a data type we wanted")
+	}
+
+	return notes
+
+}
 
 //returns Query with {-1,""} if empty
 func dequeue(queue []Query) ([]Query, Query) {
@@ -420,30 +447,38 @@ func main() {
 	fmt.Println(redisInstances)
 	fmt.Println(redisQueues)
 
-	// Loop infinitely while waiting for incoming connections.
-	// Decides based on coordinates which cache should be used.
+	// HAVE NOT IMPLEMENTED QUEUING - JUST FOR TESTING
 
-	/*
-		//get location to search from
-		lon, lat := getRandomCoordinates()
-		fmt.Printf("searching 21,000km radius from lat: %f, lon: %f\n", lon, lat)
-		// search in the maximum radius on earths surface (20,905km)
-		reply := GEORADIUS(conn, "mapNotes", lon, lat, "21000", "km")
+	// generates incoming notes
+	go func() {
+		for {
+			time.Sleep(1000 * time.Millisecond)
 
-		switch t := reply.(type) {
-		case []interface{}:
-			returnedValues := make([]Note, len(t))
-			for i, value := range t {
-				if err := json.Unmarshal(value.([]byte), &returnedValues[i]); err != nil {
-					panic(err)
-				}
-				fmt.Println(returnedValues[i])
+			// creates artificial note
+			note := generateNote()
+
+			// uses location passed by note to decide what redis instance to pass to
+			x, y := findInstanceInRadius(note.Longitude, note.Latitude)
+
+			// adds note to redis instance
+			err = addNote(note, redisInstances[x][y])
+			if err != nil {
+				// add back to queue
 			}
-		default:
-			fmt.Println("uh oh not a data type we wanted\n")
 		}
+	}()
 
-		//delete everything on the instance
-		conn.Do("FLUSHALL")*/
+	// waits for read requests
+	for {
 
+		time.Sleep(1000 * time.Millisecond)
+
+		// get artificial coordinates for a user
+		userLon, userLat := getRandomCoordinates()
+
+		notes := readRequest(userLon, userLat, redisInstances)
+
+		fmt.Println(len(notes))
+
+	}
 }
