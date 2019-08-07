@@ -27,9 +27,25 @@ type Note struct {
 	Author_id    int
 }
 
-type Query struct {
-	idx     int
-	request string
+type Redis struct {
+	Pool [][]*redis.Pool
+	Queue []string
+}
+
+type Get struct {
+	Lat float64
+	Lon float64
+	Id int
+}
+
+type Post struct {
+	Lat float64
+	Lon float64
+	Data Note
+}
+
+type Response struct {
+	Ok bool
 }
 
 var pid int
@@ -47,16 +63,49 @@ func main() {
 		fmt.Println(err)
 		return
 	}
+	println(redisInstances)
 
-	redisQueues := makeQueues()
+	redisServers := makeRedisServers()
+	// Loop infinitely while waiting for incoming connections.
+	// Decides based on coordinates which cache should be used.
+	for x := range redisServers {
+		for y := range redisServers[x] {
+			go func(server Redis) {
+				for {
+					if len(server.Queue) > 0 {
+						var request string
+						server.Queue, request = dequeue(server.Queue)
+						go func(request string) {
+							println("REQUEST ", request)
+						}(request)
+					}
+				}
+			}(redisServers[x][y])
+		}
+	}
+	userID := 0
+	// Updates queue
+	go func(redisServers [][]Redis) {
+		// block until recieve request
+		time.Sleep(1000 * time.Millisecond)
 
-	fmt.Println(redisInstances)
-	fmt.Println(redisQueues)
+		// get artificial coordinates for a user
+		userLon, userLat := getRandomCoordinates()
+		x, y := findInstanceInRadius(userLon, userLat)
+		
+		request := Get{userLat, userLon, userID}
+		json_request, err := json.Marshal(request)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		redisServers[x][y].Queue = enqueue(redisServers[x][y].Queue, string(json_request))
+		userID++
 
-	// HAVE NOT IMPLEMENTED QUEUING - JUST FOR TESTING
+	}(redisServers)
 
-	// generates incoming notes
-	go func() {
+	// generates notes, adds to queue
+	go func(redisServers [][]Redis) {
 		for {
 			time.Sleep(1000 * time.Millisecond)
 
@@ -65,28 +114,17 @@ func main() {
 
 			// uses location passed by note to decide what redis instance to pass to
 			x, y := findInstanceInRadius(note.Longitude, note.Latitude)
-
-			// adds note to redis instance
-			err = addNote(note, redisInstances[x][y])
+			
+			request := Post{note.Latitude, note.Longitude, note}
+			json_request, err := json.Marshal(request)
 			if err != nil {
-				// add back to queue
+				fmt.Println(err)
+				return
 			}
+			// adds note to queue
+			redisServers[x][y].Queue = enqueue(redisServers[x][y].Queue, string(json_request))
 		}
-	}()
-
-	// waits for read requests
-	for {
-
-		time.Sleep(1000 * time.Millisecond)
-
-		// get artificial coordinates for a user
-		userLon, userLat := getRandomCoordinates()
-
-		notes := readRequest(userLon, userLat, redisInstances)
-
-		fmt.Println(len(notes))
-
-	}
+	}(redisServers)
 }
 
 // ------------------ redis interactions ------------------
@@ -363,29 +401,30 @@ func findInstanceInRadius(lon float64, lat float64) (int, int) {
 	return xIndex, yIndex
 }
 
-//returns Query with {-1,""} if empty
-func dequeue(queue []Query) ([]Query, Query) {
-	if len(queue) <= 0 {
-		return queue, Query{-1, ""}
+func dequeue(queue []string) ([]string, string) {
+	if len(queue) == 0 {
+		return queue, ""
 	}
-	//peek top
+	// peek top
 	x := queue[0]
-	//delete top
+	// delete top
 	queue = queue[1:]
 
 	return queue, x
 }
 
+func enqueue(queue []string, item string) ([]string) {
+	queue = append(queue, item)
+	return queue
+}
+
 // creates 2D slice of queues that map to each redis instance using 'findInstanceInRadius()'
-func makeQueues() [][][]Query {
-	redisQueues := make([][][]Query, sideLength)
-	for i := range redisQueues {
-		redisQueues[i] = make([][]Query, sideLength)
-		for j := range redisQueues[i] {
-			redisQueues[i][j] = make([]Query, 0)
-		}
+func makeRedisServers() [][]Redis {
+	server := make([][]Redis, sideLength)
+	for x := range server {
+		server[x] = make([]Redis, sideLength)
 	}
-	return redisQueues
+	return server
 }
 
 // -----------------------------------------------
