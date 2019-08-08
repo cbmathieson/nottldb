@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -66,7 +67,6 @@ var authorid int
 var userid int
 var quadrantLatSize float64 = -1
 var quadrantLonSize float64 = -1
-var totalInstances float64 = 0
 var sideLength int
 
 func main() {
@@ -77,6 +77,10 @@ func main() {
 		fmt.Println("ERROR: could not initialize redis servers")
 		return
 	}
+
+	// connect to user database
+	db, err := connectToDB()
+	defer db.Close()
 
 	// Loop infinitely while waiting for incoming connections.
 	// Decides based on coordinates which cache should be used.
@@ -103,6 +107,10 @@ func main() {
 
 	// generates notes, adds post requests to queue
 	go createPostRequests(redisServers)
+
+	// FUTURE:
+	// generate database write requests
+	// generate database read requests
 
 	time.Sleep(10000 * time.Second)
 
@@ -197,6 +205,98 @@ func handleRequest(server *Redis) error {
 		return errors.New("ERROR: Unknown message type")
 	}
 	return nil
+}
+
+// --------------------------------------------------------
+
+// ------------------ Postgres interactions ---------------
+
+func connectToDB() (*sql.DB, error) {
+	dbPort, _ := getPorts()
+	psqlCreds := fmt.Sprintf("host=localhost port=%d user=postgres password=pass dbname=postgres sslmode=disable", dbPort)
+
+	// connect to user_db
+	db, err := sql.Open("postgres", psqlCreds)
+	if err != nil {
+		return db, err
+	}
+
+	err = db.Ping()
+	if err != nil {
+		return db, err
+	}
+
+	return db, err
+}
+
+func createUser(db *sql.DB, user userData) error {
+	sqlStatement := `
+	INSERT INTO users (pid, email, profileImg, username)
+	VALUES ($1, $2, $3, $4)`
+	_, err := db.Exec(sqlStatement, strconv.Itoa(user.pid), user.email, user.profileImg, user.username)
+	return err
+}
+
+func createNewNote(db *sql.DB, note Note) error {
+	sqlStatement := `
+	INSERT INTO notes (pid, email, profileImg, username)
+	VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`
+	_, err := db.Exec(sqlStatement, note.Pid, note.Caption, note.DateCreated, note.DateFound, note.IsAnonymous, note.Latitude, note.Longitude, note.NoteImage, note.Author_id)
+	return err
+}
+
+func addToFavorites(db *sql.DB, uid string, note Note) error {
+	sqlStatement := `
+	INSERT INTO users (user_id, note_id)
+	VALUES ($1, $2)`
+	_, err := db.Exec(sqlStatement, uid, strconv.Itoa(note.Pid))
+	return err
+}
+
+func getMyNotes(db *sql.DB, uid string) ([]Note, error) {
+	rows, err := db.Query("SELECT * FROM notes WHERE author_id=$1", uid)
+	notes := make([]Note, 0)
+	if err != nil {
+		return notes, err
+	}
+
+	defer rows.Close()
+
+	for rows.Next() {
+		note := Note{}
+		err = rows.Scan(&note.Pid, &note.Caption, &note.DateCreated, &note.DateFound, &note.IsAnonymous, &note.Latitude, &note.Longitude, &note.NoteImage, &note.Author_id)
+		if err != nil {
+			return notes, err
+		}
+		notes = append(notes, note)
+	}
+
+	err = rows.Err()
+	return notes, err
+}
+
+func queryFavorites(db *sql.DB, uid int) ([]Note, error) {
+
+	rows, err := db.Query("SELECT * FROM notes INNER JOIN favorites ON notes.pid=favorites.note_id AND favorites.user_id=$1", uid)
+	notes := make([]Note, 0)
+
+	if err != nil {
+		return notes, err
+	}
+
+	defer rows.Close()
+
+	for rows.Next() {
+		note := Note{}
+		err = rows.Scan(&note.Pid, &note.Caption, &note.DateCreated, &note.DateFound, &note.IsAnonymous, &note.Latitude, &note.Longitude, &note.NoteImage, &note.Author_id)
+		if err != nil {
+			return notes, err
+		}
+		notes = append(notes, note)
+	}
+
+	err = rows.Err()
+	return notes, err
 }
 
 // --------------------------------------------------------
@@ -298,7 +398,7 @@ func initPools() ([][]*redis.Pool, error) {
 	totalLon := float64(180 + 180)
 
 	sideLength = int(math.Sqrt(float64(len(redisPorts))))
-	totalInstances = float64(len(redisPorts))
+
 	quadrantLatSize = totalLat / float64(sideLength)
 	quadrantLonSize = totalLon / float64(sideLength)
 
