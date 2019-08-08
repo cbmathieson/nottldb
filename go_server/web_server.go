@@ -12,7 +12,15 @@ import (
 	"time"
 
 	"github.com/gomodule/redigo/redis"
+	_ "github.com/lib/pq"
 )
+
+type userData struct {
+	pid        int
+	email      string
+	profileImg string
+	username   string
+}
 
 type Note struct {
 	Pid          int
@@ -28,24 +36,29 @@ type Note struct {
 }
 
 type Redis struct {
-	Pool [][]*redis.Pool
+	Pool  *redis.Pool
 	Queue []string
 }
 
 type Get struct {
 	Lat float64
 	Lon float64
-	Id int
+	Id  int
 }
 
 type Post struct {
-	Lat float64
-	Lon float64
+	Lat  float64
+	Lon  float64
 	Data Note
 }
 
 type Response struct {
 	Ok bool
+}
+
+type Envelope struct {
+	Type string
+	Msg  interface{}
 }
 
 var pid int
@@ -58,42 +71,79 @@ var sideLength int
 
 func main() {
 
-	redisInstances, err := initPools()
+	// create grid of Redis objects
+	redisServers, err := makeRedisServers()
 	if err != nil {
-		fmt.Println(err)
+		fmt.Println("ERROR: could not initialize redis servers")
 		return
 	}
-	println(redisInstances)
 
-	redisServers := makeRedisServers()
 	// Loop infinitely while waiting for incoming connections.
 	// Decides based on coordinates which cache should be used.
 	for x := range redisServers {
 		for y := range redisServers[x] {
-			go func(server Redis) {
+			go func(server *Redis) {
 				for {
+					// wait for the queue to have content
 					if len(server.Queue) > 0 {
-						var request string
-						server.Queue, request = dequeue(server.Queue)
-						go func(request string) {
-							println("REQUEST ", request)
-						}(request)
+						err := handleRequest(server)
+						if err != nil {
+							fmt.Println(err)
+						}
+					} else {
+						time.Sleep(50 * time.Millisecond)
 					}
 				}
-			}(redisServers[x][y])
+			}(&redisServers[x][y])
 		}
 	}
-	userID := 0
-	// Updates queue
-	go func(redisServers [][]Redis) {
+
+	// Randomly adds get requests to queue
+	go createGetRequests(redisServers)
+
+	// generates notes, adds post requests to queue
+	go createPostRequests(redisServers)
+
+	time.Sleep(10000 * time.Second)
+
+}
+
+// ------------------ Request Makers/Handlers ------------------
+
+func createPostRequests(redisServers [][]Redis) {
+	for {
+		time.Sleep(500 * time.Millisecond)
+
+		// creates artificial note
+		note := generateNote()
+
+		// uses location passed by note to decide what redis instance to pass to
+		x, y := findInstanceInRadius(note.Longitude, note.Latitude)
+
+		request := Envelope{"post", Post{note.Latitude, note.Longitude, note}}
+		json_request, err := json.Marshal(request)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		// adds note to queue
+		redisServers[x][y].Queue = enqueue(redisServers[x][y].Queue, string(json_request))
+	}
+}
+
+func createGetRequests(redisServers [][]Redis) {
+	for {
+
+		userID := 0
+
 		// block until recieve request
-		time.Sleep(1000 * time.Millisecond)
+		time.Sleep(500 * time.Millisecond)
 
 		// get artificial coordinates for a user
 		userLon, userLat := getRandomCoordinates()
 		x, y := findInstanceInRadius(userLon, userLat)
-		
-		request := Get{userLat, userLon, userID}
+
+		request := Envelope{"get", Get{userLat, userLon, userID}}
 		json_request, err := json.Marshal(request)
 		if err != nil {
 			fmt.Println(err)
@@ -101,31 +151,55 @@ func main() {
 		}
 		redisServers[x][y].Queue = enqueue(redisServers[x][y].Queue, string(json_request))
 		userID++
-
-	}(redisServers)
-
-	// generates notes, adds to queue
-	go func(redisServers [][]Redis) {
-		for {
-			time.Sleep(1000 * time.Millisecond)
-
-			// creates artificial note
-			note := generateNote()
-
-			// uses location passed by note to decide what redis instance to pass to
-			x, y := findInstanceInRadius(note.Longitude, note.Latitude)
-			
-			request := Post{note.Latitude, note.Longitude, note}
-			json_request, err := json.Marshal(request)
-			if err != nil {
-				fmt.Println(err)
-				return
-			}
-			// adds note to queue
-			redisServers[x][y].Queue = enqueue(redisServers[x][y].Queue, string(json_request))
-		}
-	}(redisServers)
+	}
 }
+
+func handleRequest(server *Redis) error {
+	var request string
+	server.Queue, request = dequeue(server.Queue)
+
+	//Decide if Get or Post
+	var msg json.RawMessage
+	env := Envelope{
+		Msg: &msg,
+	}
+
+	if err := json.Unmarshal([]byte(request), &env); err != nil {
+		return err
+	}
+
+	switch env.Type {
+	case "get":
+		fmt.Println("get request!")
+
+		var get Get
+		err := json.Unmarshal(msg, &get)
+		if err != nil {
+			return err
+		}
+
+		notes := readRequest(get.Lon, get.Lat, server.Pool)
+		println("notes in instance: ", len(notes))
+	case "post":
+		fmt.Println("post request!")
+		var post Post
+		err := json.Unmarshal(msg, &post)
+		if err != nil {
+			return err
+		}
+		err = addNote(post.Data, server.Pool)
+		if err != nil {
+			return err
+		}
+		fmt.Println("Successfully added note!")
+	default:
+		fmt.Printf("unknown message type: %s\n", env.Type)
+		return errors.New("ERROR: Unknown message type")
+	}
+	return nil
+}
+
+// --------------------------------------------------------
 
 // ------------------ redis interactions ------------------
 
@@ -145,7 +219,7 @@ func addNote(note Note, pool *redis.Pool) error {
 	//fmt.Println(string(b))
 	input := string(b)
 
-	fmt.Printf("note lat: %f, lon: %f\n", note.Latitude, note.Longitude)
+	//fmt.Printf("note lat: %f, lon: %f\n", note.Latitude, note.Longitude)
 
 	err = GEOADD(c, note, input)
 
@@ -175,16 +249,14 @@ func createPools(ports []int) [][]*redis.Pool {
 }
 
 // handles user request for notes in area
-func readRequest(lon float64, lat float64, redisInstances [][]*redis.Pool) []Note {
+func readRequest(lon float64, lat float64, pool *redis.Pool) []Note {
 
-	x, y := findInstanceInRadius(lon, lat)
-
-	pool := redisInstances[x][y]
+	//fmt.Println(pool)
 
 	c := pool.Get()
 	defer c.Close()
 
-	fmt.Printf("searching 21,000km radius from lat: %f, lon: %f in instance x:%d,y:%d\n", lon, lat, x, y)
+	//fmt.Printf("searching 21,000km radius from lat: %f, lon: %f\n", lon, lat)
 
 	reply := GEORADIUS(c, lon, lat, "21000", "km")
 
@@ -230,7 +302,7 @@ func initPools() ([][]*redis.Pool, error) {
 	quadrantLatSize = totalLat / float64(sideLength)
 	quadrantLonSize = totalLon / float64(sideLength)
 
-	fmt.Printf("lat: %f, lon: %f per quadrant\n", quadrantLatSize, quadrantLonSize)
+	//fmt.Printf("lat: %f, lon: %f per quadrant\n", quadrantLatSize, quadrantLonSize)
 
 	redisInstances := createPools(redisPorts)
 
@@ -255,8 +327,8 @@ func generateNote() Note {
 		false,
 		lat,
 		lon,
-		"https://firebasestorage.googleapis.com/v0/b/nottl-92731.appspot.com/o/notes%2F01DE3BD6-2807-4947-B39A-8A7F13397EE0.jpg?alt=media&token=12f02b79-894d-497e-985f-0f10063c58da",
-		"https://firebasestorage.googleapis.com/v0/b/nottl-92731.appspot.com/o/profile_pictures%2F27171C21-C9BD-4452-AF66-DC417DD508D8.jpg?alt=media&token=4e217783-f10c-44e0-8b82-b0104d59010d",
+		"", //"https://firebasestorage.googleapis.com/v0/b/nottl-92731.appspot.com/o/notes%2F01DE3BD6-2807-4947-B39A-8A7F13397EE0.jpg?alt=media&token=12f02b79-894d-497e-985f-0f10063c58da",
+		"", //https://firebasestorage.googleapis.com/v0/b/nottl-92731.appspot.com/o/profile_pictures%2F27171C21-C9BD-4452-AF66-DC417DD508D8.jpg?alt=media&token=4e217783-f10c-44e0-8b82-b0104d59010d",
 		authorid,
 	}
 }
@@ -413,18 +485,31 @@ func dequeue(queue []string) ([]string, string) {
 	return queue, x
 }
 
-func enqueue(queue []string, item string) ([]string) {
+func enqueue(queue []string, item string) []string {
 	queue = append(queue, item)
 	return queue
 }
 
 // creates 2D slice of queues that map to each redis instance using 'findInstanceInRadius()'
-func makeRedisServers() [][]Redis {
+func makeRedisServers() ([][]Redis, error) {
+
+	// generate connection pools
+	redisInstances, err := initPools()
+	if err != nil {
+		fmt.Println(err)
+		return [][]Redis{}, err
+	}
+
 	server := make([][]Redis, sideLength)
+
 	for x := range server {
 		server[x] = make([]Redis, sideLength)
+		for y := 0; y < sideLength; y++ {
+			server[x][y].Pool = redisInstances[x][y]
+		}
 	}
-	return server
+
+	return server, nil
 }
 
 // -----------------------------------------------
@@ -464,12 +549,12 @@ func ping(c redis.Conn) error {
 		return err
 	}
 
-	s, err := redis.String(pong, err)
+	_, err = redis.String(pong, err)
 	if err != nil {
 		return err
 	}
 
-	fmt.Printf("PING Response = %s\n", s)
+	//fmt.Printf("PING Response = %s\n", s)
 	return nil
 }
 
