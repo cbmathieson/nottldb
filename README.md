@@ -1,4 +1,4 @@
-# nottldb
+<img src="final_report/logo.png" width="150">
 
 A backend system for nottl
 
